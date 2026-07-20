@@ -4,7 +4,7 @@
   "description": "Atemschutzüberwachung nach FwDV 7 für die Freiwillige Feuerwehr Tengling",
   "start_url": "./index.html",
   "scope": "./",
-  "display": "fullscreen",
+  "display": "standalone",
   "orientation": "any",
   "background_color": "#12161a",
   "theme_color": "#d7263d",
