@@ -597,6 +597,17 @@
     return sign + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
   }
 
+  function fmtDuration(ms){
+    const totalSec = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if(h > 0){
+      return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    }
+    return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  }
+
   function beep(freq, dur){
     try{
       const ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
@@ -680,6 +691,7 @@
   endedBarToggle.addEventListener('click', () => {
     grid.classList.toggle('show-ended');
     updateEndedIndicator();
+    saveState();
   });
 
   const TRUPP_COLORS = ['#4ea8de', '#f4a261', '#e9c46a', '#2a9d8f', '#ff8fa3', '#94d2bd', '#a9def9', '#cdb4db'];
@@ -719,6 +731,7 @@
       pressureWarning: false,
       startTime: null,
       lastCheck: null,
+      endTime: null,
       pressure: '',
       lastAlertAt: null,
       pressureAlerted: false
@@ -759,6 +772,10 @@
       '<div class="meta">' +
         '<span>Start: <span id="startedAt-' + t.id + '">–</span></span>' +
         '<span>Letzte Meldung: <span id="lastAt-' + t.id + '">–</span></span>' +
+      '</div>' +
+      '<div class="meta">' +
+        '<span>Ende: <span id="endedAt-' + t.id + '">–</span></span>' +
+        '<span>Einsatzdauer: <span id="duration-' + t.id + '">–</span></span>' +
       '</div>' +
       '<div class="pressure">' +
         '<span>Flaschendruck (bar)</span>' +
@@ -822,6 +839,8 @@
       document.getElementById('ruckzug-' + t.id).disabled = false;
       document.getElementById('ende-' + t.id).disabled = false;
       document.getElementById('startedAt-' + t.id).textContent = fmtClock(t.startTime);
+      document.getElementById('endedAt-' + t.id).textContent = '–';
+      document.getElementById('duration-' + t.id).textContent = '–';
       addLog(t.name, 'Start', 'Einsatz unter Atemschutz angetreten', currentFeuerwehr(), t.id);
       updateEndedIndicator();
       acquireWakeLock();
@@ -875,10 +894,15 @@
       const ok = confirm(t.name + ' wirklich beenden? Die Kachel wird danach ausgeblendet.');
       if(!ok) return;
       t.state = 'ended';
+      t.endTime = new Date();
       document.getElementById('ruckmeld-' + t.id).disabled = true;
       document.getElementById('ruckzug-' + t.id).disabled = true;
       document.getElementById('ende-' + t.id).disabled = true;
-      addLog(t.name, 'Einsatz beendet', '', currentFeuerwehr(), t.id);
+      document.getElementById('endedAt-' + t.id).textContent = fmtClock(t.endTime);
+      const durationMs = t.startTime ? (t.endTime - t.startTime) : 0;
+      const durationText = t.startTime ? fmtDuration(durationMs) : '–';
+      document.getElementById('duration-' + t.id).textContent = durationText;
+      addLog(t.name, 'Einsatz beendet', 'Einsatzdauer ' + durationText, currentFeuerwehr(), t.id);
       t.rueckzugManual = false;
       t.pressureWarning = false;
       t.pressureAlerted = false;
@@ -901,6 +925,7 @@
       pressureThreshold: document.getElementById('pressureThreshold').value,
       soundOn: soundOn,
       notifyOn: notifyOn,
+      showEnded: grid.classList.contains('show-ended'),
       logEntries: logEntries,
       trupps: trupps.map(t => ({
         id: t.id,
@@ -910,6 +935,7 @@
         pressureWarning: t.pressureWarning,
         startTime: t.startTime ? t.startTime.toISOString() : null,
         lastCheck: t.lastCheck ? t.lastCheck.toISOString() : null,
+        endTime: t.endTime ? t.endTime.toISOString() : null,
         pressure: t.pressure,
         alerted: t.alerted,
         lastAlertAt: t.lastAlertAt ? t.lastAlertAt.toISOString() : null,
@@ -954,6 +980,7 @@
     soundToggle.textContent = soundOn ? '🔊 Ton' : '🔇 Ton';
     notifyOn = !!data.notifyOn && ('Notification' in window) && Notification.permission === 'granted';
     updateNotifyButton();
+    grid.classList.toggle('show-ended', !!data.showEnded);
 
     logEntries.length = 0;
     (data.logEntries || []).forEach(e => logEntries.push(e));
@@ -968,6 +995,7 @@
       t.pressureWarning = !!saved.pressureWarning;
       t.startTime = saved.startTime ? new Date(saved.startTime) : null;
       t.lastCheck = saved.lastCheck ? new Date(saved.lastCheck) : null;
+      t.endTime = saved.endTime ? new Date(saved.endTime) : null;
       t.pressure = saved.pressure || '';
       t.alerted = !!saved.alerted;
       t.lastAlertAt = saved.lastAlertAt ? new Date(saved.lastAlertAt) : null;
@@ -1008,6 +1036,12 @@
         endeBtn.disabled = true;
         if(t.startTime) document.getElementById('startedAt-' + t.id).textContent = fmtClock(t.startTime);
         if(t.lastCheck) document.getElementById('lastAt-' + t.id).textContent = fmtClock(t.lastCheck);
+        if(t.endTime){
+          document.getElementById('endedAt-' + t.id).textContent = fmtClock(t.endTime);
+          if(t.startTime){
+            document.getElementById('duration-' + t.id).textContent = fmtDuration(t.endTime - t.startTime);
+          }
+        }
       }
 
       if(t.refreshStartButton) t.refreshStartButton();
