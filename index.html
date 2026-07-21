@@ -168,6 +168,31 @@
   .icon-btn:hover{ border-color: var(--fire); }
   .icon-btn.active{ background: var(--fire); border-color: var(--fire); }
 
+  .zoom-group{
+    display:flex;
+    align-items:center;
+    gap:0;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .zoom-btn{
+    border: none;
+    border-radius: 0;
+    padding: 8px 14px;
+    font-size: 16px;
+    font-weight:800;
+    line-height:1;
+  }
+  .zoom-level{
+    padding: 0 10px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--text-dim);
+    min-width: 42px;
+    text-align:center;
+  }
+
   /* ---------- Main grid ---------- */
   main{
     padding: 16px;
@@ -527,6 +552,11 @@
     <button class="icon-btn active" id="soundToggle">🔊 Ton</button>
     <button class="icon-btn" id="notifyToggle">🔔 Benachrichtigungen</button>
     <button class="icon-btn" id="exportBtn">⬇ Protokoll</button>
+    <div class="zoom-group">
+      <button class="icon-btn zoom-btn" id="zoomOutBtn" type="button" aria-label="Kacheln verkleinern">−</button>
+      <span class="zoom-level" id="zoomLevelText">100%</span>
+      <button class="icon-btn zoom-btn" id="zoomInBtn" type="button" aria-label="Kacheln vergrößern">+</button>
+    </div>
     <button class="icon-btn" id="resetBtn">↺ Zurücksetzen</button>
   </div>
 </header>
@@ -568,6 +598,12 @@
   const logEntries = [];
   let soundOn = true;
   let notifyOn = true;
+  let zoomLevel = 1;
+
+  function applyZoom(){
+    grid.style.zoom = zoomLevel;
+    zoomLevelText.textContent = Math.round(zoomLevel * 100) + '%';
+  }
 
   const grid = document.getElementById('grid');
   const endedBar = document.getElementById('endedBar');
@@ -580,6 +616,9 @@
   const notifyToggle = document.getElementById('notifyToggle');
   const exportBtn = document.getElementById('exportBtn');
   const resetBtn = document.getElementById('resetBtn');
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
+  const zoomLevelText = document.getElementById('zoomLevelText');
   const logBody = document.getElementById('logBody');
   const logCount = document.getElementById('logCount');
 
@@ -926,6 +965,7 @@
       soundOn: soundOn,
       notifyOn: notifyOn,
       showEnded: grid.classList.contains('show-ended'),
+      zoomLevel: zoomLevel,
       logEntries: logEntries,
       trupps: trupps.map(t => ({
         id: t.id,
@@ -981,6 +1021,8 @@
     notifyOn = !!data.notifyOn && ('Notification' in window) && Notification.permission === 'granted';
     updateNotifyButton();
     grid.classList.toggle('show-ended', !!data.showEnded);
+    zoomLevel = (typeof data.zoomLevel === 'number' && data.zoomLevel > 0) ? data.zoomLevel : 1;
+    applyZoom();
 
     logEntries.length = 0;
     (data.logEntries || []).forEach(e => logEntries.push(e));
@@ -1084,6 +1126,7 @@
   document.getElementById('addTruppBtn').addEventListener('click', addNewTrupp);
 
   restoreState();
+  applyZoom();
   updateEndedIndicator();
 
   function tick(){
@@ -1260,13 +1303,25 @@
   intervalInput.addEventListener('change', saveState);
   document.getElementById('pressureThreshold').addEventListener('change', saveState);
 
+  zoomInBtn.addEventListener('click', () => {
+    zoomLevel = Math.min(1.6, Math.round((zoomLevel + 0.1) * 10) / 10);
+    applyZoom();
+    saveState();
+  });
+  zoomOutBtn.addEventListener('click', () => {
+    zoomLevel = Math.max(0.6, Math.round((zoomLevel - 0.1) * 10) / 10);
+    applyZoom();
+    saveState();
+  });
+
   resetBtn.addEventListener('click', () => {
     const ok = confirm('Wirklich alle Daten zurücksetzen? Trupps, Namen und das Protokoll werden unwiderruflich gelöscht.');
     if(!ok) return;
     const keepNotifyOn = notifyOn;
+    const keepZoomLevel = zoomLevel;
     try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
     try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ notifyOn: keepNotifyOn }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ notifyOn: keepNotifyOn, zoomLevel: keepZoomLevel }));
     }catch(e){}
     location.reload();
   });
