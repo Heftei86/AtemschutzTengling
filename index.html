@@ -217,7 +217,34 @@
     border-left-color: var(--rueckzug);
     box-shadow: 0 0 0 1px rgba(122,58,176,0.4), 0 0 18px rgba(122,58,176,0.3);
   }
-  .card.ended{ opacity: 0.5; }
+  .card.ended{ display: none; opacity: 0.5; }
+  .grid.show-ended .card.ended{ display: flex; }
+
+  .ended-bar{
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: var(--bg-panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .ended-bar.visible{ display: flex; }
+  .ended-bar button{
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .ended-bar button:hover{ border-color: var(--fire); }
 
   .card.add-tile{
     align-items:center;
@@ -455,7 +482,7 @@
   }
   .log-row:nth-child(odd){ background: rgba(255,255,255,0.015); }
   .log-row .t{ color: var(--text-dim); }
-  .log-row .trupp{ color: var(--fire); font-weight:700; }
+  .log-row .trupp{ font-weight:700; }
   .log-row .fw{ color: var(--text-dim); font-weight:500; }
   .log-empty{ padding: 18px 14px; color: var(--text-dim); font-size:13px; }
 
@@ -515,6 +542,11 @@
 
   <div class="grid" id="grid"></div>
 
+  <div class="ended-bar" id="endedBar">
+    <span id="endedBarText">0 Trupps beendet, ausgeblendet</span>
+    <button id="endedBarToggle" type="button">Anzeigen</button>
+  </div>
+
   <div class="log-wrap">
     <div class="log-head">
       <h2>Einsatzprotokoll</h2>
@@ -538,6 +570,9 @@
   let notifyOn = false;
 
   const grid = document.getElementById('grid');
+  const endedBar = document.getElementById('endedBar');
+  const endedBarText = document.getElementById('endedBarText');
+  const endedBarToggle = document.getElementById('endedBarToggle');
   const clockEl = document.getElementById('clock');
   const dateLine = document.getElementById('dateLine');
   const intervalInput = document.getElementById('intervalMin');
@@ -631,9 +666,30 @@
     }
   }
 
-  function addLog(truppName, event, detail, feuerwehr){
+  function updateEndedIndicator(){
+    const count = trupps.filter(t => t.state === 'ended').length;
+    if(count === 0){
+      endedBar.classList.remove('visible');
+      return;
+    }
+    endedBar.classList.add('visible');
+    const showing = grid.classList.contains('show-ended');
+    endedBarText.textContent = count + (count === 1 ? ' Trupp beendet, ausgeblendet' : ' Trupps beendet, ausgeblendet');
+    endedBarToggle.textContent = showing ? 'Ausblenden' : 'Anzeigen';
+  }
+  endedBarToggle.addEventListener('click', () => {
+    grid.classList.toggle('show-ended');
+    updateEndedIndicator();
+  });
+
+  const TRUPP_COLORS = ['#4ea8de', '#f4a261', '#e9c46a', '#2a9d8f', '#ff8fa3', '#94d2bd', '#a9def9', '#cdb4db'];
+  function truppColor(id){
+    return TRUPP_COLORS[(id - 1) % TRUPP_COLORS.length];
+  }
+
+  function addLog(truppName, event, detail, feuerwehr, truppId){
     const now = new Date();
-    logEntries.unshift({time: fmtClock(now), trupp: truppName, feuerwehr: feuerwehr || '', event, detail: detail || ''});
+    logEntries.unshift({time: fmtClock(now), trupp: truppName, truppId: truppId, feuerwehr: feuerwehr || '', event, detail: detail || ''});
     renderLog();
   }
 
@@ -644,7 +700,7 @@
       return;
     }
     logBody.innerHTML = logEntries.map(e =>
-      '<div class="log-row"><span class="t">' + e.time + '</span><span class="trupp">' + escapeHtml(e.trupp) +
+      '<div class="log-row"><span class="t">' + e.time + '</span><span class="trupp" style="color:' + truppColor(e.truppId || 1) + '">' + escapeHtml(e.trupp) +
       (e.feuerwehr ? ' <span class="fw">(' + escapeHtml(e.feuerwehr) + ')</span>' : '') +
       '</span><span>' + escapeHtml(e.event) + (e.detail ? ' — ' + escapeHtml(e.detail) : '') + '</span></div>'
     ).join('');
@@ -747,6 +803,8 @@
     refreshStartButton();
 
     document.getElementById('start-' + t.id).addEventListener('click', () => {
+      const ok = confirm(t.name + ' wirklich starten – Einsatz unter Atemschutz beginnt jetzt?');
+      if(!ok) return;
       t.state = 'active';
       t.rueckzugManual = false;
       t.pressureWarning = false;
@@ -764,7 +822,9 @@
       document.getElementById('ruckzug-' + t.id).disabled = false;
       document.getElementById('ende-' + t.id).disabled = false;
       document.getElementById('startedAt-' + t.id).textContent = fmtClock(t.startTime);
-      addLog(t.name, 'Start', 'Einsatz unter Atemschutz angetreten', currentFeuerwehr());
+      addLog(t.name, 'Start', 'Einsatz unter Atemschutz angetreten', currentFeuerwehr(), t.id);
+      updateEndedIndicator();
+      acquireWakeLock();
       saveState();
     });
 
@@ -789,15 +849,15 @@
         if(!t.pressureAlerted){
           t.pressureAlerted = true;
           alertSound();
-          addLog(t.name, 'RÜCKZUG – Flaschendruck', p + ' bar ≤ Warnschwelle (' + threshold + ' bar)' + noteSuffix, currentFeuerwehr());
+          addLog(t.name, 'RÜCKZUG – Flaschendruck', p + ' bar ≤ Warnschwelle (' + threshold + ' bar)' + noteSuffix, currentFeuerwehr(), t.id);
         } else {
-          addLog(t.name, 'Rückmeldung', p + ' bar (weiterhin unter Warnschwelle)' + noteSuffix, currentFeuerwehr());
+          addLog(t.name, 'Rückmeldung', p + ' bar (weiterhin unter Warnschwelle)' + noteSuffix, currentFeuerwehr(), t.id);
         }
       } else {
         t.pressureWarning = false;
         t.pressureAlerted = false;
         pInput.classList.remove('low');
-        addLog(t.name, 'Rückmeldung', (p ? (p + ' bar') : '') + noteSuffix, currentFeuerwehr());
+        addLog(t.name, 'Rückmeldung', (p ? (p + ' bar') : '') + noteSuffix, currentFeuerwehr(), t.id);
       }
       if(noteInput) noteInput.value = '';
       saveState();
@@ -807,22 +867,29 @@
       t.rueckzugManual = !t.rueckzugManual;
       const btn = document.getElementById('ruckzug-' + t.id);
       btn.textContent = t.rueckzugManual ? 'Rückzug aufheben' : 'Rückzug';
-      addLog(t.name, t.rueckzugManual ? 'Rückzug angetreten (manuell)' : 'Rückzug aufgehoben', '', currentFeuerwehr());
+      addLog(t.name, t.rueckzugManual ? 'Rückzug angetreten (manuell)' : 'Rückzug aufgehoben', '', currentFeuerwehr(), t.id);
       saveState();
     });
 
     document.getElementById('ende-' + t.id).addEventListener('click', () => {
+      const ok = confirm(t.name + ' wirklich beenden? Die Kachel wird danach ausgeblendet.');
+      if(!ok) return;
       t.state = 'ended';
       document.getElementById('ruckmeld-' + t.id).disabled = true;
       document.getElementById('ruckzug-' + t.id).disabled = true;
       document.getElementById('ende-' + t.id).disabled = true;
-      addLog(t.name, 'Einsatz beendet', '', currentFeuerwehr());
+      addLog(t.name, 'Einsatz beendet', '', currentFeuerwehr(), t.id);
       t.rueckzugManual = false;
       t.pressureWarning = false;
       t.pressureAlerted = false;
       document.getElementById('ruckzug-' + t.id).textContent = 'Rückzug';
       document.getElementById('pressure-' + t.id).classList.remove('low');
       refreshStartButton();
+      updateEndedIndicator();
+      if(!hasActiveTrupp() && wakeLock){
+        wakeLock.release().catch(() => {});
+        wakeLock = null;
+      }
       saveState();
     });
   }
@@ -983,6 +1050,7 @@
   document.getElementById('addTruppBtn').addEventListener('click', addNewTrupp);
 
   restoreState();
+  updateEndedIndicator();
 
   function tick(){
     const now = new Date();
@@ -1017,19 +1085,12 @@
 
       const elapsed = (now - t.lastCheck) / 1000;
       const remaining = intervalSec - elapsed;
+      const overdue = remaining <= 0;
+      const inRueckzug = t.pressureWarning || t.rueckzugManual;
 
-      if(t.pressureWarning){
-        card.classList.add('rueckzug');
-        badge.className = 'badge rueckzug';
-        badge.textContent = 'Rückzug (Luft)';
-      } else if(t.rueckzugManual){
-        card.classList.add('rueckzug');
-        badge.className = 'badge rueckzug';
-        badge.textContent = 'Rückzug';
-      } else if(remaining <= 0){
-        card.classList.add('danger');
-        badge.className = 'badge danger';
-        badge.textContent = 'Abfrage fällig';
+      // Die Abfrage läuft auch während des Rückzugs weiter – ein zurückgehender Trupp
+      // muss ebenso regelmäßig Rückmeldung geben, bis er "Ende" meldet.
+      if(overdue){
         if(!t.lastAlertAt || (now - t.lastAlertAt) >= 60000){
           t.lastAlertAt = now;
           t.alerted = true;
@@ -1038,6 +1099,18 @@
           sendOverdueNotification(t.name, fwEl ? fwEl.value.trim() : '');
           saveState();
         }
+      }
+
+      if(inRueckzug){
+        card.classList.add('rueckzug');
+        if(overdue) card.classList.add('danger');
+        badge.className = 'badge rueckzug';
+        const rueckzugLabel = t.pressureWarning ? 'Rückzug (Luft)' : 'Rückzug';
+        badge.textContent = overdue ? rueckzugLabel + ' · Abfrage fällig' : rueckzugLabel;
+      } else if(overdue){
+        card.classList.add('danger');
+        badge.className = 'badge danger';
+        badge.textContent = 'Abfrage fällig';
       } else if(remaining <= intervalSec * (1 - warnPct)){
         card.classList.add('warn');
         badge.className = 'badge warn';
@@ -1055,6 +1128,37 @@
 
   setInterval(tick, 1000);
   tick();
+
+  // ---- Hintergrund-Zuverlässigkeit ----
+  // Browser drosseln Timer in Hintergrund-Tabs stark. Damit nichts verloren geht,
+  // wird beim Zurückkehren in die App sofort neu berechnet und nachgeholt (fällige
+  // Abfragen/Alarme erscheinen dann ohne Verzögerung), und ein Wake Lock hält den
+  // Bildschirm wach, solange mindestens ein Trupp aktiv überwacht wird.
+  let wakeLock = null;
+
+  function hasActiveTrupp(){
+    return trupps.some(t => t.state === 'active');
+  }
+
+  async function acquireWakeLock(){
+    if(!('wakeLock' in navigator)) return;
+    if(!hasActiveTrupp()) return;
+    try{
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }catch(e){
+      // z.B. Berechtigung verweigert oder Tab nicht sichtbar – kein harter Fehler
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible'){
+      tick(); // sofort nachholen, was während der Abwesenheit fällig wurde
+      acquireWakeLock();
+    }
+  });
+
+  acquireWakeLock();
 
   soundToggle.addEventListener('click', () => {
     soundOn = !soundOn;
