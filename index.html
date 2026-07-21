@@ -518,6 +518,19 @@
     padding: 20px 10px 30px;
   }
 
+  .sync-field input{ width: 110px; text-transform: uppercase; }
+  .sync-status{
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    padding: 6px 4px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .sync-status.ok{ color: var(--ok-glow); }
+  .sync-status.warn{ color: var(--warn-glow); }
+  .sync-status.danger{ color: var(--danger-glow); }
+
   @media (max-width: 640px){
     .clock{ font-size:22px; }
     .grid{ grid-template-columns: 1fr 1fr; }
@@ -552,6 +565,12 @@
     <button class="icon-btn active" id="soundToggle">🔊 Ton</button>
     <button class="icon-btn" id="notifyToggle">🔔 Benachrichtigungen</button>
     <button class="icon-btn" id="exportBtn">⬇ Protokoll</button>
+    <div class="field sync-field">
+      <label>Sync-Code</label>
+      <input type="text" id="syncCode" placeholder="z.B. TENGL01" maxlength="16" />
+    </div>
+    <button class="icon-btn" id="syncToggle">🔄 Verbinden</button>
+    <span class="sync-status" id="syncStatus">● Nicht verbunden</span>
     <div class="zoom-group">
       <button class="icon-btn zoom-btn" id="zoomOutBtn" type="button" aria-label="Kacheln verkleinern">−</button>
       <span class="zoom-level" id="zoomLevelText">100%</span>
@@ -587,18 +606,76 @@
     </div>
   </div>
 
-  <footer>Lokale, eigenständige Anwendung · keine Serververbindung · Stand der Daten geht bei Neuladen der Seite verloren</footer>
+  <footer>Lokale Anwendung mit optionaler Live-Synchronisierung über Firebase · Daten werden nur bei aktiver Sync-Verbindung an den eingetragenen Sync-Code übertragen</footer>
 </main>
 
-<script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ============================================================
+// Firebase-Konfiguration
+// ------------------------------------------------------------
+// Hier die Zugangsdaten der eigenen Firebase-Konsole eintragen:
+// https://console.firebase.google.com  →  Projekt anlegen
+//   →  "Web-App hinzufügen"  →  Konfigurationsobjekt kopieren.
+// In der Konsole zusätzlich aktivieren:
+//   • Firestore Database (im "Testmodus" oder mit den
+//     Sicherheitsregeln aus der Anleitung anlegen)
+//   • Authentication → Anmeldeanbieter "Anonym" aktivieren
+// ============================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyD4ZkSvt5UE2MLtWt_a1oMEzlKuKiQy-Sw",
+  authDomain: "atemschutztengling.firebaseapp.com",
+  projectId: "atemschutztengling",
+  storageBucket: "atemschutztengling.firebasestorage.app",
+  messagingSenderId: "809038028190",
+  appId: "1:809038028190:web:0f0408f56a03ed0fb20a8f",
+  measurementId: "G-HJTVVW3ZLJ"
+};
+const FIREBASE_CONFIGURED = !!(firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith('HIER_'));
+
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+let authReadyPromise = null;
+function ensureSignedIn(){
+  if(!authReadyPromise){
+    authReadyPromise = signInAnonymously(auth).catch((e) => {
+      authReadyPromise = null;
+      throw e;
+    });
+  }
+  return authReadyPromise;
+}
+
 (function(){
   let addTileEl = null;
   const STORAGE_KEY = 'atemschutz_fwdv7_state_v1';
+  const SYNC_CODE_KEY = 'atemschutz_sync_code_v1';
+  const CLIENT_ID_KEY = 'atemschutz_client_id_v1';
   const trupps = [];
   const logEntries = [];
   let soundOn = true;
   let notifyOn = true;
   let zoomLevel = 1;
+
+  // ---- Live-Synchronisierung (Firebase Firestore) ----
+  let clientId = (() => {
+    try{
+      let id = localStorage.getItem(CLIENT_ID_KEY);
+      if(!id){
+        id = 'c_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem(CLIENT_ID_KEY, id);
+      }
+      return id;
+    }catch(e){ return 'c_' + Math.random().toString(36).slice(2); }
+  })();
+  let syncEnabled = false;
+  let sessionDocRef = null;
+  let unsubscribeSnapshot = null;
+  let syncPushTimer = null;
 
   function applyZoom(){
     grid.style.zoom = zoomLevel;
@@ -760,6 +837,247 @@
   function escapeHtml(str){
     return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
+
+  const syncCodeInput = document.getElementById('syncCode');
+  const syncToggleBtn = document.getElementById('syncToggle');
+  const syncStatusEl = document.getElementById('syncStatus');
+
+  function setSyncStatus(state){
+    syncStatusEl.classList.remove('ok','warn','danger');
+    if(state === 'connected'){
+      syncStatusEl.textContent = '● Verbunden – live synchronisiert';
+      syncStatusEl.classList.add('ok');
+      syncToggleBtn.textContent = '🔄 Trennen';
+      syncToggleBtn.classList.add('active');
+    } else if(state === 'connecting'){
+      syncStatusEl.textContent = '● Verbinde …';
+      syncStatusEl.classList.add('warn');
+    } else if(state === 'error'){
+      syncStatusEl.textContent = '● Verbindungsfehler';
+      syncStatusEl.classList.add('danger');
+      syncToggleBtn.textContent = '🔄 Verbinden';
+      syncToggleBtn.classList.remove('active');
+    } else {
+      syncStatusEl.textContent = '● Nicht verbunden';
+      syncToggleBtn.textContent = '🔄 Verbinden';
+      syncToggleBtn.classList.remove('active');
+    }
+  }
+
+  // Nur die für den Einsatz relevanten Felder werden synchronisiert.
+  // Geräte-eigene Einstellungen (Ton, Benachrichtigungen, Zoom, Alarm-Zeitstempel)
+  // bleiben bewusst lokal, damit z.B. jedes Gerät unabhängig voneinander
+  // bei einer überfälligen Abfrage akustisch warnt.
+  function collectSyncState(){
+    return {
+      einsatzName: document.getElementById('einsatzName').value,
+      intervalMin: intervalInput.value,
+      pressureThreshold: document.getElementById('pressureThreshold').value,
+      logEntries: logEntries,
+      trupps: trupps.map(t => ({
+        id: t.id,
+        name: t.name,
+        state: t.state,
+        rueckzugManual: t.rueckzugManual,
+        pressureWarning: t.pressureWarning,
+        startTime: t.startTime ? t.startTime.toISOString() : null,
+        lastCheck: t.lastCheck ? t.lastCheck.toISOString() : null,
+        endTime: t.endTime ? t.endTime.toISOString() : null,
+        pressure: t.pressure,
+        members: [1,2,3].map(n => {
+          const el = document.getElementById('member-' + t.id + '-' + n);
+          return el ? el.value : '';
+        }),
+        feuerwehr: (() => {
+          const el = document.getElementById('feuerwehr-' + t.id);
+          return el ? el.value : '';
+        })(),
+        rueckmeldungText: (() => {
+          const el = document.getElementById('rueckmeldungText-' + t.id);
+          return el ? el.value : '';
+        })()
+      }))
+    };
+  }
+
+  function scheduleSyncPush(){
+    if(!syncEnabled || !sessionDocRef) return;
+    clearTimeout(syncPushTimer);
+    syncPushTimer = setTimeout(pushStateToFirestore, 350);
+  }
+
+  function pushStateToFirestore(){
+    if(!syncEnabled || !sessionDocRef) return;
+    setDoc(sessionDocRef, {
+      state: collectSyncState(),
+      updatedBy: clientId,
+      updatedAt: serverTimestamp()
+    }, { merge: true }).catch((e) => {
+      console.error('Sync-Übertragung fehlgeschlagen', e);
+      setSyncStatus('error');
+    });
+  }
+
+  // Wendet einen von einem anderen Gerät empfangenen Stand an, ohne Eingaben
+  // zu überschreiben, die hier gerade aktiv getippt werden.
+  function applyRemoteState(remote){
+    if(!remote) return;
+    const active = document.activeElement;
+    const activeId = active ? active.id : null;
+
+    if(remote.einsatzName !== undefined && activeId !== 'einsatzName'){
+      document.getElementById('einsatzName').value = remote.einsatzName || '';
+    }
+    if(remote.intervalMin !== undefined && activeId !== 'intervalMin'){
+      intervalInput.value = remote.intervalMin || 10;
+    }
+    if(remote.pressureThreshold !== undefined && activeId !== 'pressureThreshold'){
+      document.getElementById('pressureThreshold').value = remote.pressureThreshold;
+    }
+
+    if(Array.isArray(remote.logEntries)){
+      logEntries.length = 0;
+      remote.logEntries.forEach(e => logEntries.push(e));
+      renderLog();
+    }
+
+    (remote.trupps || []).forEach(saved => {
+      let t = trupps.find(x => x.id === saved.id);
+      if(!t){
+        t = createTrupp(saved.id);
+        buildCard(t);
+        if(saved.id >= nextTruppId) nextTruppId = saved.id + 1;
+      }
+      const wasPressureWarning = t.pressureWarning;
+
+      t.name = saved.name || t.name;
+      t.state = saved.state || 'idle';
+      t.rueckzugManual = !!saved.rueckzugManual;
+      t.pressureWarning = !!saved.pressureWarning;
+      t.startTime = saved.startTime ? new Date(saved.startTime) : null;
+      t.lastCheck = saved.lastCheck ? new Date(saved.lastCheck) : null;
+      t.endTime = saved.endTime ? new Date(saved.endTime) : null;
+      t.pressure = saved.pressure || '';
+
+      const nameEl = document.getElementById('name-' + t.id);
+      if(nameEl) nameEl.textContent = t.name;
+
+      const feuerwehrInput = document.getElementById('feuerwehr-' + t.id);
+      if(feuerwehrInput && activeId !== feuerwehrInput.id) feuerwehrInput.value = saved.feuerwehr || '';
+
+      const rueckmeldungInput = document.getElementById('rueckmeldungText-' + t.id);
+      if(rueckmeldungInput && activeId !== rueckmeldungInput.id) rueckmeldungInput.value = saved.rueckmeldungText || '';
+
+      (saved.members || []).forEach((val, idx) => {
+        const el = document.getElementById('member-' + t.id + '-' + (idx + 1));
+        if(el && activeId !== el.id) el.value = val || '';
+      });
+
+      const pressureInput = document.getElementById('pressure-' + t.id);
+      if(pressureInput){
+        if(activeId !== pressureInput.id) pressureInput.value = t.pressure;
+        pressureInput.classList.toggle('low', !!t.pressureWarning);
+      }
+
+      const startBtn = document.getElementById('start-' + t.id);
+      const ruckmeldBtn = document.getElementById('ruckmeld-' + t.id);
+      const ruckzugBtn = document.getElementById('ruckzug-' + t.id);
+      const endeBtn = document.getElementById('ende-' + t.id);
+
+      if(t.state === 'active'){
+        startBtn.disabled = true;
+        ruckmeldBtn.disabled = false;
+        ruckzugBtn.disabled = false;
+        endeBtn.disabled = false;
+        ruckzugBtn.textContent = t.rueckzugManual ? 'Rückzug aufheben' : 'Rückzug';
+        if(t.startTime) document.getElementById('startedAt-' + t.id).textContent = fmtClock(t.startTime);
+        if(t.lastCheck) document.getElementById('lastAt-' + t.id).textContent = fmtClock(t.lastCheck);
+      } else if(t.state === 'ended'){
+        ruckmeldBtn.disabled = true;
+        ruckzugBtn.disabled = true;
+        endeBtn.disabled = true;
+        if(t.endTime){
+          document.getElementById('endedAt-' + t.id).textContent = fmtClock(t.endTime);
+          if(t.startTime) document.getElementById('duration-' + t.id).textContent = fmtDuration(t.endTime - t.startTime);
+        }
+      } else {
+        startBtn.disabled = false;
+        ruckmeldBtn.disabled = true;
+        ruckzugBtn.disabled = true;
+        endeBtn.disabled = true;
+      }
+
+      if(t.refreshStartButton) t.refreshStartButton();
+
+      // Warnung durch Flaschendruck ist ein diskretes Ereignis (per Knopfdruck
+      // auf einem Gerät ausgelöst) – damit es auf ALLEN verbundenen Geräten
+      // hörbar/sichtbar wird, wird hier bei jedem Gerät erneut alarmiert.
+      if(t.pressureWarning && !wasPressureWarning){
+        alertSound();
+        sendOverdueNotification(t.name + ' – Rückzug (Luft)', saved.feuerwehr || '');
+      }
+    });
+
+    updateEndedIndicator();
+  }
+
+  async function connectSync(rawCode){
+    const code = (rawCode || '').trim().toUpperCase();
+    if(!code){
+      alert('Bitte zuerst einen Sync-Code eingeben (z.B. den Funkrufnamen oder Einsatzcode). Alle Geräte mit demselben Code sehen dieselben Daten.');
+      return;
+    }
+    if(!FIREBASE_CONFIGURED){
+      alert('Firebase ist in dieser App noch nicht eingerichtet. Bitte im Quellcode den Abschnitt "Firebase-Konfiguration" mit den Zugangsdaten des eigenen Firebase-Projekts ausfüllen.');
+      return;
+    }
+    setSyncStatus('connecting');
+    try{
+      await ensureSignedIn();
+      if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+      sessionDocRef = doc(db, 'atemschutz_sessions', code);
+      syncEnabled = true;
+      unsubscribeSnapshot = onSnapshot(sessionDocRef, (snap) => {
+        if(!snap.exists()){
+          // Noch keine Daten unter diesem Code vorhanden – eigenen Stand als Basis anlegen.
+          pushStateToFirestore();
+          setSyncStatus('connected');
+          return;
+        }
+        const data = snap.data();
+        if(data.updatedBy === clientId) { setSyncStatus('connected'); return; } // Echo der eigenen Änderung ignorieren
+        applyRemoteState(data.state);
+        setSyncStatus('connected');
+      }, (err) => {
+        console.error('Sync-Empfang fehlgeschlagen', err);
+        setSyncStatus('error');
+      });
+      try{ localStorage.setItem(SYNC_CODE_KEY, code); }catch(e){}
+      setSyncStatus('connected');
+    }catch(e){
+      console.error(e);
+      syncEnabled = false;
+      setSyncStatus('error');
+      alert('Verbindung zur Synchronisierung fehlgeschlagen: ' + (e && e.message ? e.message : e));
+    }
+  }
+
+  function disconnectSync(){
+    if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+    clearTimeout(syncPushTimer);
+    sessionDocRef = null;
+    syncEnabled = false;
+    try{ localStorage.removeItem(SYNC_CODE_KEY); }catch(e){}
+    setSyncStatus('disconnected');
+  }
+
+  syncToggleBtn.addEventListener('click', () => {
+    if(syncEnabled){ disconnectSync(); }
+    else { connectSync(syncCodeInput.value); }
+  });
+  syncCodeInput.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter' && !syncEnabled) connectSync(syncCodeInput.value);
+  });
 
   function createTrupp(index){
     const t = {
@@ -1002,6 +1320,7 @@
     }catch(e){
       // Speicher nicht verfügbar (z.B. in einer eingebetteten Vorschau) – App läuft trotzdem weiter.
     }
+    scheduleSyncPush();
   }
 
   function restoreState(){
@@ -1128,6 +1447,16 @@
   restoreState();
   applyZoom();
   updateEndedIndicator();
+  setSyncStatus('disconnected');
+
+  // Zuvor verwendeten Sync-Code beim Start automatisch wieder verbinden.
+  try{
+    const savedSyncCode = localStorage.getItem(SYNC_CODE_KEY);
+    if(savedSyncCode){
+      syncCodeInput.value = savedSyncCode;
+      connectSync(savedSyncCode);
+    }
+  }catch(e){}
 
   function tick(){
     const now = new Date();
@@ -1315,7 +1644,8 @@
   });
 
   resetBtn.addEventListener('click', () => {
-    const ok = confirm('Wirklich alle Daten zurücksetzen? Trupps, Namen und das Protokoll werden unwiderruflich gelöscht.');
+    const warnSync = syncEnabled ? '\n\nHinweis: Dieses Gerät ist per Sync verbunden – der Reset wird auf ALLE verbundenen Geräte übertragen!' : '';
+    const ok = confirm('Wirklich alle Daten zurücksetzen? Trupps, Namen und das Protokoll werden unwiderruflich gelöscht.' + warnSync);
     if(!ok) return;
     const keepNotifyOn = notifyOn;
     const keepZoomLevel = zoomLevel;
@@ -1323,16 +1653,16 @@
     try{
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ notifyOn: keepNotifyOn, zoomLevel: keepZoomLevel }));
     }catch(e){}
-    location.reload();
+    if(syncEnabled && sessionDocRef){
+      setDoc(sessionDocRef, {
+        state: { einsatzName: '', intervalMin: '10', pressureThreshold: '60', logEntries: [], trupps: [] },
+        updatedBy: clientId,
+        updatedAt: serverTimestamp()
+      }).catch(() => {}).finally(() => location.reload());
+    } else {
+      location.reload();
+    }
   });
-
-  if('serviceWorker' in navigator){
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('service-worker.js').catch(() => {
-        // Offline-Registrierung fehlgeschlagen (z.B. lokale Dateivorschau) – App funktioniert trotzdem.
-      });
-    });
-  }
 
   exportBtn.addEventListener('click', () => {
     const einsatz = document.getElementById('einsatzName').value.trim() || 'Ohne Angabe';

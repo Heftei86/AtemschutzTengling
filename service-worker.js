@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atemschutz-cache-v2';
+const CACHE_NAME = 'atemschutz-cache-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -29,6 +29,10 @@ self.addEventListener('activate', (event) => {
 // (z.B. im Keller/Einsatz ohne Empfang), greift der zuletzt gespeicherte Stand.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  // Nur Requests an die eigene Origin abfangen/cachen. Firebase (Firestore,
+  // Auth, gstatic-Module) läuft über eigene Verbindungen (u.a. WebChannel/
+  // WebSocket) und darf vom Service Worker nicht beeinflusst werden.
+  if (!event.request.url.startsWith(self.location.origin)) return;
 
   event.respondWith(
     fetch(event.request)
