@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atemschutz-cache-v1';
+const CACHE_NAME = 'atemschutz-cache-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -24,19 +24,22 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Netzwerk zuerst: Bei bestehender Internetverbindung wird immer die aktuellste
+// Version geladen und im Cache aktualisiert. Nur wenn kein Netz verfügbar ist
+// (z.B. im Keller/Einsatz ohne Empfang), greift der zuletzt gespeicherte Stand.
 self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        // Cache successful same-origin GET responses for future offline use
-        if (event.request.method === 'GET' && response && response.status === 200) {
+    fetch(event.request)
+      .then((response) => {
+        if (response && response.status === 200) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      }).catch(() => cached);
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });
 
