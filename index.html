@@ -567,7 +567,7 @@
   const trupps = [];
   const logEntries = [];
   let soundOn = true;
-  let notifyOn = false;
+  let notifyOn = true;
 
   const grid = document.getElementById('grid');
   const endedBar = document.getElementById('endedBar');
@@ -1226,6 +1226,22 @@
   });
   updateNotifyButton();
 
+  // Beim App-Start Benachrichtigungen automatisch aktivieren, sofern der Nutzer
+  // sie nicht zuvor bewusst ausgeschaltet hat.
+  const notifyExplicitlyDisabled = !!(initialSavedData && initialSavedData.notifyOn === false);
+  if('Notification' in window && !notifyExplicitlyDisabled){
+    if(Notification.permission === 'granted'){
+      notifyOn = true;
+      updateNotifyButton();
+    } else if(Notification.permission === 'default'){
+      Notification.requestPermission().then((perm) => {
+        notifyOn = (perm === 'granted');
+        updateNotifyButton();
+        saveState();
+      });
+    }
+  }
+
   document.getElementById('einsatzName').addEventListener('change', saveState);
   intervalInput.addEventListener('change', saveState);
   document.getElementById('pressureThreshold').addEventListener('change', saveState);
@@ -1233,7 +1249,11 @@
   resetBtn.addEventListener('click', () => {
     const ok = confirm('Wirklich alle Daten zurücksetzen? Trupps, Namen und das Protokoll werden unwiderruflich gelöscht.');
     if(!ok) return;
+    const keepNotifyOn = notifyOn;
     try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ notifyOn: keepNotifyOn }));
+    }catch(e){}
     location.reload();
   });
 
