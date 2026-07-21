@@ -1227,19 +1227,33 @@
   updateNotifyButton();
 
   // Beim App-Start Benachrichtigungen automatisch aktivieren, sofern der Nutzer
-  // sie nicht zuvor bewusst ausgeschaltet hat.
+  // sie nicht zuvor bewusst ausgeschaltet hat. Browser lassen die
+  // Berechtigungsabfrage aber nur direkt nach einer echten Nutzer-Interaktion zu
+  // (ein Aufruf sofort beim Laden der Seite wird sonst stillschweigend ignoriert),
+  // daher wird beim allerersten Tippen/Klicken irgendwo in der App nachgeholt.
   const notifyExplicitlyDisabled = !!(initialSavedData && initialSavedData.notifyOn === false);
-  if('Notification' in window && !notifyExplicitlyDisabled){
+
+  function tryAutoEnableNotifications(){
+    if(notifyExplicitlyDisabled) return;
+    if(!('Notification' in window)) return;
     if(Notification.permission === 'granted'){
       notifyOn = true;
       updateNotifyButton();
-    } else if(Notification.permission === 'default'){
+      return;
+    }
+    if(Notification.permission === 'default'){
       Notification.requestPermission().then((perm) => {
         notifyOn = (perm === 'granted');
         updateNotifyButton();
         saveState();
-      });
+      }).catch(() => {});
     }
+  }
+
+  tryAutoEnableNotifications(); // funktioniert in manchen Kontexten (z.B. installierte PWA) direkt
+
+  if('Notification' in window && Notification.permission === 'default' && !notifyExplicitlyDisabled){
+    document.addEventListener('pointerdown', tryAutoEnableNotifications, { once: true, capture: true });
   }
 
   document.getElementById('einsatzName').addEventListener('change', saveState);
