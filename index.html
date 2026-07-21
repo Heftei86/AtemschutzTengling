@@ -1304,12 +1304,12 @@
   document.getElementById('pressureThreshold').addEventListener('change', saveState);
 
   zoomInBtn.addEventListener('click', () => {
-    zoomLevel = Math.min(1.6, Math.round((zoomLevel + 0.1) * 10) / 10);
+    zoomLevel = Math.min(2.2, Math.round((zoomLevel + 0.1) * 10) / 10);
     applyZoom();
     saveState();
   });
   zoomOutBtn.addEventListener('click', () => {
-    zoomLevel = Math.max(0.6, Math.round((zoomLevel - 0.1) * 10) / 10);
+    zoomLevel = Math.max(0.3, Math.round((zoomLevel - 0.1) * 10) / 10);
     applyZoom();
     saveState();
   });
