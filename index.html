@@ -1909,9 +1909,18 @@ function ensureSignedIn(){
   });
 
   resetBtn.addEventListener('click', () => {
-    const warnSync = syncEnabled ? '\n\nHinweis: Dieses Gerät ist per Sync verbunden – der Reset wird auf ALLE verbundenen Geräte übertragen!' : '';
-    const ok = confirm('Wirklich alle Daten zurücksetzen? Trupps, Namen und das Protokoll werden unwiderruflich gelöscht.' + warnSync);
-    if(!ok) return;
+    if(syncEnabled){
+      const current = currentSyncCode();
+      const typed = prompt('Dieses Gerät ist per Sync verbunden. Der Reset wirkt auf ALLE verbundenen Geräte!\n\nZur Bestätigung bitte den aktuellen Sync-Code eingeben: "' + current + '"');
+      if(typed === null) return; // abgebrochen
+      if((typed || '').trim().toUpperCase() !== current){
+        alert('Sync-Code stimmt nicht überein. Zurücksetzen abgebrochen.');
+        return;
+      }
+    } else {
+      const ok = confirm('Wirklich alle Daten zurücksetzen? Trupps, Namen und das Protokoll werden unwiderruflich gelöscht.');
+      if(!ok) return;
+    }
     const keepNotifyOn = notifyOn;
     const keepZoomLevel = zoomLevel;
     try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
