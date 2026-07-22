@@ -1046,19 +1046,44 @@ function ensureSignedIn(){
     }
 
     if(Array.isArray(data.logEntries)){
-      // Lokale und entfernte Einträge anhand des Zeitstempels zusammenführen
-      // (verlustfrei, auch wenn zwei Geräte gleichzeitig protokollieren).
-      const merged = new Map();
-      const keyOf = e => e.ts || [e.time, e.trupp, e.event, e.detail].join('|');
-      logEntries.forEach(e => merged.set(keyOf(e), e));
-      data.logEntries.forEach(e => merged.set(keyOf(e), e));
-      const sorted = Array.from(merged.values()).sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
-      logEntries.length = 0;
-      sorted.forEach(e => logEntries.push(e));
-      renderLog();
+      if(data.logEntries.length === 0 && logEntries.length > 0){
+        // Leeres Protokoll vom Server = Reset auf einem anderen Gerät -> lokal übernehmen.
+        logEntries.length = 0;
+        renderLog();
+      } else {
+        // Lokale und entfernte Einträge anhand des Zeitstempels zusammenführen
+        // (verlustfrei, auch wenn zwei Geräte gleichzeitig protokollieren).
+        const merged = new Map();
+        const keyOf = e => e.ts || [e.time, e.trupp, e.event, e.detail].join('|');
+        logEntries.forEach(e => merged.set(keyOf(e), e));
+        data.logEntries.forEach(e => merged.set(keyOf(e), e));
+        const sorted = Array.from(merged.values()).sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
+        logEntries.length = 0;
+        sorted.forEach(e => logEntries.push(e));
+        renderLog();
+      }
     }
 
-    const remoteTrupps = (data.trupps && typeof data.trupps === 'object') ? Object.values(data.trupps) : [];
+    const remoteTruppsMap = (data.trupps && typeof data.trupps === 'object') ? data.trupps : {};
+
+    // Trupps werden im Normalbetrieb nie serverseitig entfernt (nur ergänzt) –
+    // ein leeres "trupps"-Objekt kann daher nur von einem Reset auf einem
+    // anderen Gerät stammen. In diesem Fall lokal auf den Ausgangszustand
+    // zurücksetzen (wie beim normalen Neuladen nach einem Reset).
+    if(Object.keys(remoteTruppsMap).length === 0 && trupps.length > 0){
+      trupps.slice().forEach(t => {
+        const card = document.getElementById('card-' + t.id);
+        if(card) card.remove();
+      });
+      trupps.length = 0;
+      const t1 = createTrupp(1);
+      buildCard(t1);
+      nextTruppId = 2;
+      updateEndedIndicator();
+      return;
+    }
+
+    const remoteTrupps = Object.values(remoteTruppsMap);
     remoteTrupps.forEach(saved => {
       let t = trupps.find(x => x.id === saved.id);
       if(!t){
