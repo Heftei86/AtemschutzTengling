@@ -515,8 +515,17 @@
     text-align:center;
     color: var(--text-dim);
     font-size:11px;
-    padding: 20px 10px 30px;
+    padding: 20px 10px 4px;
   }
+
+  .sync-devices{
+    text-align:center;
+    color: var(--text-dim);
+    font-size:11.5px;
+    font-weight:600;
+    padding: 0 10px 30px;
+  }
+  .sync-devices.ok{ color: var(--ok-glow); }
 
   .sync-field input{ width: 110px; text-transform: uppercase; }
   .sync-status{
@@ -607,12 +616,13 @@
   </div>
 
   <footer>Lokale Anwendung mit optionaler Live-Synchronisierung über Firebase · Daten werden nur bei aktiver Sync-Verbindung an den eingetragenen Sync-Code übertragen</footer>
+  <div class="sync-devices" id="syncDevices"></div>
 </main>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, collection, getDoc, setDoc, deleteDoc, onSnapshot, serverTimestamp, arrayUnion } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ============================================================
 // Firebase-Konfiguration
@@ -676,6 +686,13 @@ function ensureSignedIn(){
   let sessionDocRef = null;
   let unsubscribeSnapshot = null;
   let syncPushTimer = null;
+  let presenceCollectionRef = null;
+  let unsubscribePresence = null;
+  let presenceHeartbeatTimer = null;
+  let presenceRefreshTimer = null;
+  let presenceDocs = new Map();
+  const PRESENCE_HEARTBEAT_MS = 20000;
+  const PRESENCE_STALE_MS = 50000;
 
   function applyZoom(){
     grid.style.zoom = zoomLevel;
@@ -817,7 +834,7 @@ function ensureSignedIn(){
 
   function addLog(truppName, event, detail, feuerwehr, truppId){
     const now = new Date();
-    logEntries.unshift({time: fmtClock(now), trupp: truppName, truppId: truppId, feuerwehr: feuerwehr || '', event, detail: detail || ''});
+    logEntries.unshift({ts: now.toISOString(), time: fmtClock(now), trupp: truppName, truppId: truppId, feuerwehr: feuerwehr || '', event, detail: detail || ''});
     renderLog();
   }
 
@@ -868,35 +885,29 @@ function ensureSignedIn(){
   // Geräte-eigene Einstellungen (Ton, Benachrichtigungen, Zoom, Alarm-Zeitstempel)
   // bleiben bewusst lokal, damit z.B. jedes Gerät unabhängig voneinander
   // bei einer überfälligen Abfrage akustisch warnt.
-  function collectSyncState(){
+  function truppSyncData(t){
     return {
-      einsatzName: document.getElementById('einsatzName').value,
-      intervalMin: intervalInput.value,
-      pressureThreshold: document.getElementById('pressureThreshold').value,
-      logEntries: logEntries,
-      trupps: trupps.map(t => ({
-        id: t.id,
-        name: t.name,
-        state: t.state,
-        rueckzugManual: t.rueckzugManual,
-        pressureWarning: t.pressureWarning,
-        startTime: t.startTime ? t.startTime.toISOString() : null,
-        lastCheck: t.lastCheck ? t.lastCheck.toISOString() : null,
-        endTime: t.endTime ? t.endTime.toISOString() : null,
-        pressure: t.pressure,
-        members: [1,2,3].map(n => {
-          const el = document.getElementById('member-' + t.id + '-' + n);
-          return el ? el.value : '';
-        }),
-        feuerwehr: (() => {
-          const el = document.getElementById('feuerwehr-' + t.id);
-          return el ? el.value : '';
-        })(),
-        rueckmeldungText: (() => {
-          const el = document.getElementById('rueckmeldungText-' + t.id);
-          return el ? el.value : '';
-        })()
-      }))
+      id: t.id,
+      name: t.name,
+      state: t.state,
+      rueckzugManual: t.rueckzugManual,
+      pressureWarning: t.pressureWarning,
+      startTime: t.startTime ? t.startTime.toISOString() : null,
+      lastCheck: t.lastCheck ? t.lastCheck.toISOString() : null,
+      endTime: t.endTime ? t.endTime.toISOString() : null,
+      pressure: t.pressure,
+      members: [1,2,3].map(n => {
+        const el = document.getElementById('member-' + t.id + '-' + n);
+        return el ? el.value : '';
+      }),
+      feuerwehr: (() => {
+        const el = document.getElementById('feuerwehr-' + t.id);
+        return el ? el.value : '';
+      })(),
+      rueckmeldungText: (() => {
+        const el = document.getElementById('rueckmeldungText-' + t.id);
+        return el ? el.value : '';
+      })()
     };
   }
 
@@ -906,13 +917,28 @@ function ensureSignedIn(){
     syncPushTimer = setTimeout(pushStateToFirestore, 350);
   }
 
+  // Jeder Trupp wird als eigenes, unabhängiges Feld ("trupps.<id>") geschrieben.
+  // Dadurch überschreiben sich zwei Geräte NICHT mehr gegenseitig, wenn sie
+  // gleichzeitig unterschiedliche Trupps bearbeiten (z.B. Smartphone + PC).
+  // Das Protokoll wird per arrayUnion nur ERGÄNZT statt komplett ersetzt.
   function pushStateToFirestore(){
     if(!syncEnabled || !sessionDocRef) return;
-    setDoc(sessionDocRef, {
-      state: collectSyncState(),
+    const payload = {
       updatedBy: clientId,
-      updatedAt: serverTimestamp()
-    }, { merge: true }).catch((e) => {
+      updatedAt: serverTimestamp(),
+      settings: {
+        einsatzName: document.getElementById('einsatzName').value,
+        intervalMin: intervalInput.value,
+        pressureThreshold: document.getElementById('pressureThreshold').value
+      }
+    };
+    trupps.forEach(t => {
+      payload['trupps.' + t.id] = truppSyncData(t);
+    });
+    if(logEntries.length){
+      payload.logEntries = arrayUnion(...logEntries);
+    }
+    setDoc(sessionDocRef, payload, { merge: true }).catch((e) => {
       console.error('Sync-Übertragung fehlgeschlagen', e);
       setSyncStatus('error');
     });
@@ -920,28 +946,37 @@ function ensureSignedIn(){
 
   // Wendet einen von einem anderen Gerät empfangenen Stand an, ohne Eingaben
   // zu überschreiben, die hier gerade aktiv getippt werden.
-  function applyRemoteState(remote){
-    if(!remote) return;
+  function applyRemoteState(data){
+    if(!data) return;
     const active = document.activeElement;
     const activeId = active ? active.id : null;
+    const settings = data.settings || {};
 
-    if(remote.einsatzName !== undefined && activeId !== 'einsatzName'){
-      document.getElementById('einsatzName').value = remote.einsatzName || '';
+    if(settings.einsatzName !== undefined && activeId !== 'einsatzName'){
+      document.getElementById('einsatzName').value = settings.einsatzName || '';
     }
-    if(remote.intervalMin !== undefined && activeId !== 'intervalMin'){
-      intervalInput.value = remote.intervalMin || 10;
+    if(settings.intervalMin !== undefined && activeId !== 'intervalMin'){
+      intervalInput.value = settings.intervalMin || 10;
     }
-    if(remote.pressureThreshold !== undefined && activeId !== 'pressureThreshold'){
-      document.getElementById('pressureThreshold').value = remote.pressureThreshold;
+    if(settings.pressureThreshold !== undefined && activeId !== 'pressureThreshold'){
+      document.getElementById('pressureThreshold').value = settings.pressureThreshold;
     }
 
-    if(Array.isArray(remote.logEntries)){
+    if(Array.isArray(data.logEntries)){
+      // Lokale und entfernte Einträge anhand des Zeitstempels zusammenführen
+      // (verlustfrei, auch wenn zwei Geräte gleichzeitig protokollieren).
+      const merged = new Map();
+      const keyOf = e => e.ts || [e.time, e.trupp, e.event, e.detail].join('|');
+      logEntries.forEach(e => merged.set(keyOf(e), e));
+      data.logEntries.forEach(e => merged.set(keyOf(e), e));
+      const sorted = Array.from(merged.values()).sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
       logEntries.length = 0;
-      remote.logEntries.forEach(e => logEntries.push(e));
+      sorted.forEach(e => logEntries.push(e));
       renderLog();
     }
 
-    (remote.trupps || []).forEach(saved => {
+    const remoteTrupps = (data.trupps && typeof data.trupps === 'object') ? Object.values(data.trupps) : [];
+    remoteTrupps.forEach(saved => {
       let t = trupps.find(x => x.id === saved.id);
       if(!t){
         t = createTrupp(saved.id);
@@ -1037,22 +1072,28 @@ function ensureSignedIn(){
       if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
       sessionDocRef = doc(db, 'atemschutz_sessions', code);
       syncEnabled = true;
+
+      // Beim Verbinden immer zuerst den aktuellen Stand von Firebase holen
+      // und anwenden – unabhängig davon, wer die Daten zuletzt geschrieben hat.
+      const initialSnap = await getDoc(sessionDocRef);
+      if(initialSnap.exists()){
+        applyRemoteState(initialSnap.data());
+      } else {
+        // Noch keine Daten unter diesem Code vorhanden – eigenen Stand als Basis anlegen.
+        pushStateToFirestore();
+      }
+
       unsubscribeSnapshot = onSnapshot(sessionDocRef, (snap) => {
-        if(!snap.exists()){
-          // Noch keine Daten unter diesem Code vorhanden – eigenen Stand als Basis anlegen.
-          pushStateToFirestore();
-          setSyncStatus('connected');
-          return;
-        }
+        if(!snap.exists()) return;
         const data = snap.data();
-        if(data.updatedBy === clientId) { setSyncStatus('connected'); return; } // Echo der eigenen Änderung ignorieren
-        applyRemoteState(data.state);
-        setSyncStatus('connected');
+        if(data.updatedBy === clientId) return; // eigene Änderung, kein erneutes Anwenden nötig
+        applyRemoteState(data);
       }, (err) => {
         console.error('Sync-Empfang fehlgeschlagen', err);
         setSyncStatus('error');
       });
       try{ localStorage.setItem(SYNC_CODE_KEY, code); }catch(e){}
+      startPresence();
       setSyncStatus('connected');
     }catch(e){
       console.error(e);
@@ -1063,20 +1104,113 @@ function ensureSignedIn(){
   }
 
   function disconnectSync(){
+    syncEnabled = false;
+    stopPresence();
     if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
     clearTimeout(syncPushTimer);
     sessionDocRef = null;
-    syncEnabled = false;
     try{ localStorage.removeItem(SYNC_CODE_KEY); }catch(e){}
     setSyncStatus('disconnected');
   }
 
-  syncToggleBtn.addEventListener('click', () => {
-    if(syncEnabled){ disconnectSync(); }
-    else { connectSync(syncCodeInput.value); }
+  const syncDevicesEl = document.getElementById('syncDevices');
+
+  function renderDeviceCount(){
+    if(!syncEnabled){
+      syncDevicesEl.textContent = '';
+      syncDevicesEl.classList.remove('ok');
+      return;
+    }
+    const now = Date.now();
+    let count = 0;
+    presenceDocs.forEach((lastSeen) => {
+      if(lastSeen && (now - lastSeen) <= PRESENCE_STALE_MS) count++;
+    });
+    if(count < 1) count = 1; // dieses Gerät zählt immer mit
+    syncDevicesEl.textContent = count === 1
+      ? '1 Gerät verbunden (nur dieses)'
+      : count + ' Geräte gerade verbunden';
+    syncDevicesEl.classList.toggle('ok', count > 1);
+  }
+
+  function sendPresenceHeartbeat(){
+    if(!syncEnabled || !presenceCollectionRef) return;
+    setDoc(doc(presenceCollectionRef, clientId), { lastSeen: serverTimestamp() }).catch(() => {});
+  }
+
+  function startPresence(){
+    presenceCollectionRef = collection(sessionDocRef, 'presence');
+    presenceDocs = new Map();
+    sendPresenceHeartbeat();
+    presenceHeartbeatTimer = setInterval(sendPresenceHeartbeat, PRESENCE_HEARTBEAT_MS);
+    unsubscribePresence = onSnapshot(presenceCollectionRef, (snap) => {
+      presenceDocs = new Map();
+      snap.forEach((d) => {
+        const data = d.data();
+        const ts = data.lastSeen && typeof data.lastSeen.toMillis === 'function' ? data.lastSeen.toMillis() : Date.now();
+        presenceDocs.set(d.id, ts);
+      });
+      renderDeviceCount();
+    }, () => {});
+    // Anzeige auch ohne Serverantwort regelmäßig auffrischen, damit
+    // ausgestiegene Geräte (kein Heartbeat mehr) verschwinden.
+    clearInterval(presenceRefreshTimer);
+    presenceRefreshTimer = setInterval(renderDeviceCount, 10000);
+    renderDeviceCount();
+  }
+
+  function stopPresence(){
+    clearInterval(presenceHeartbeatTimer);
+    presenceHeartbeatTimer = null;
+    clearInterval(presenceRefreshTimer);
+    presenceRefreshTimer = null;
+    if(unsubscribePresence){ unsubscribePresence(); unsubscribePresence = null; }
+    if(presenceCollectionRef){
+      deleteDoc(doc(presenceCollectionRef, clientId)).catch(() => {});
+    }
+    presenceCollectionRef = null;
+    presenceDocs = new Map();
+    renderDeviceCount();
+  }
+
+  window.addEventListener('beforeunload', () => {
+    // Bestmögliches Aufräumen; falls das nicht mehr ankommt, verschwindet
+    // der Eintrag spätestens nach Ablauf der Heartbeat-Frist automatisch.
+    if(presenceCollectionRef){
+      deleteDoc(doc(presenceCollectionRef, clientId)).catch(() => {});
+    }
   });
+
+  function currentSyncCode(){
+    return sessionDocRef ? sessionDocRef.id : null;
+  }
+
+  function handleSyncAction(){
+    const requested = (syncCodeInput.value || '').trim().toUpperCase();
+    if(syncEnabled){
+      const current = currentSyncCode();
+      if(requested && requested !== current){
+        // Der Code im Feld wurde geändert, während eine Verbindung aktiv ist –
+        // vor dem Wechsel ausdrücklich nachfragen, da die aktuelle Sitzung
+        // dabei verlassen wird.
+        const ok = confirm('Sync-Code wirklich von "' + current + '" auf "' + requested + '" ändern?\n\nDie aktuelle Verbindung wird getrennt und stattdessen eine Sitzung mit dem neuen Code aufgebaut.');
+        if(!ok){
+          syncCodeInput.value = current;
+          return;
+        }
+        disconnectSync();
+        connectSync(requested);
+      } else {
+        disconnectSync();
+      }
+    } else {
+      connectSync(syncCodeInput.value);
+    }
+  }
+
+  syncToggleBtn.addEventListener('click', handleSyncAction);
   syncCodeInput.addEventListener('keydown', (e) => {
-    if(e.key === 'Enter' && !syncEnabled) connectSync(syncCodeInput.value);
+    if(e.key === 'Enter') handleSyncAction();
   });
 
   function createTrupp(index){
@@ -1655,7 +1789,9 @@ function ensureSignedIn(){
     }catch(e){}
     if(syncEnabled && sessionDocRef){
       setDoc(sessionDocRef, {
-        state: { einsatzName: '', intervalMin: '10', pressureThreshold: '60', logEntries: [], trupps: [] },
+        settings: { einsatzName: '', intervalMin: '10', pressureThreshold: '60' },
+        trupps: {},
+        logEntries: [],
         updatedBy: clientId,
         updatedAt: serverTimestamp()
       }).catch(() => {}).finally(() => location.reload());
