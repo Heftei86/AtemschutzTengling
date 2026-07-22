@@ -542,6 +542,7 @@
     padding: 0 10px 30px;
   }
   .sync-devices.ok{ color: var(--ok-glow); }
+  .sync-devices.danger{ color: var(--danger-glow); }
 
   .sync-bar{
     display:flex;
@@ -736,6 +737,7 @@ function ensureSignedIn(){
   let presenceHeartbeatTimer = null;
   let presenceRefreshTimer = null;
   let presenceDocs = new Map();
+  let presenceErrorText = null;
   const PRESENCE_HEARTBEAT_MS = 20000;
   const PRESENCE_STALE_MS = 50000;
 
@@ -915,7 +917,7 @@ function ensureSignedIn(){
   const syncToggleBtn = document.getElementById('syncToggle');
   const syncStatusEl = document.getElementById('syncStatus');
 
-  function setSyncStatus(state){
+  function setSyncStatus(state, detail){
     syncStatusEl.classList.remove('ok','warn','danger');
     if(state === 'connected'){
       syncStatusEl.textContent = 'Verbunden';
@@ -926,7 +928,7 @@ function ensureSignedIn(){
       syncStatusEl.textContent = 'Verbinde …';
       syncStatusEl.classList.add('warn');
     } else if(state === 'error'){
-      syncStatusEl.textContent = 'Verbindungsfehler';
+      syncStatusEl.textContent = 'Fehler' + (detail ? ' (' + detail + ')' : '');
       syncStatusEl.classList.add('danger');
       syncToggleBtn.textContent = 'Verbinden';
       syncToggleBtn.classList.remove('active');
@@ -998,7 +1000,7 @@ function ensureSignedIn(){
         logEntries: logEntries
       }, { merge: true }).catch((e) => {
         console.error('Sync-Übertragung fehlgeschlagen', e);
-        setSyncStatus('error');
+        setSyncStatus('error', e && e.code ? e.code : 'push');
       });
       return;
     }
@@ -1021,7 +1023,7 @@ function ensureSignedIn(){
         return;
       }
       console.error('Sync-Übertragung fehlgeschlagen', e);
-      setSyncStatus('error');
+      setSyncStatus('error', e && e.code ? e.code : 'push');
     });
   }
 
@@ -1171,7 +1173,7 @@ function ensureSignedIn(){
         applyRemoteState(data);
       }, (err) => {
         console.error('Sync-Empfang fehlgeschlagen', err);
-        setSyncStatus('error');
+        setSyncStatus('error', err && err.code ? err.code : 'empfang');
       });
       try{ localStorage.setItem(SYNC_CODE_KEY, code); }catch(e){}
       startPresence();
@@ -1179,7 +1181,7 @@ function ensureSignedIn(){
     }catch(e){
       console.error(e);
       syncEnabled = false;
-      setSyncStatus('error');
+      setSyncStatus('error', e && e.code ? e.code : undefined);
       alert('Verbindung zur Synchronisierung fehlgeschlagen: ' + (e && e.message ? e.message : e));
     }
   }
@@ -1199,9 +1201,16 @@ function ensureSignedIn(){
   function renderDeviceCount(){
     if(!syncEnabled){
       syncDevicesEl.textContent = '';
-      syncDevicesEl.classList.remove('ok');
+      syncDevicesEl.classList.remove('ok','danger');
       return;
     }
+    if(presenceErrorText){
+      syncDevicesEl.textContent = presenceErrorText;
+      syncDevicesEl.classList.remove('ok');
+      syncDevicesEl.classList.add('danger');
+      return;
+    }
+    syncDevicesEl.classList.remove('danger');
     const now = Date.now();
     let count = 0;
     presenceDocs.forEach((lastSeen) => {
@@ -1216,15 +1225,22 @@ function ensureSignedIn(){
 
   function sendPresenceHeartbeat(){
     if(!syncEnabled || !presenceCollectionRef) return;
-    setDoc(doc(presenceCollectionRef, clientId), { lastSeen: serverTimestamp() }).catch(() => {});
+    setDoc(doc(presenceCollectionRef, clientId), { lastSeen: serverTimestamp() }).then(() => {
+      if(presenceErrorText){ presenceErrorText = null; renderDeviceCount(); }
+    }).catch((e) => {
+      presenceErrorText = 'Geräteanzahl-Fehler: ' + (e && e.code ? e.code : (e && e.message ? e.message : e));
+      renderDeviceCount();
+    });
   }
 
   function startPresence(){
     presenceCollectionRef = collection(sessionDocRef, 'presence');
     presenceDocs = new Map();
+    presenceErrorText = null;
     sendPresenceHeartbeat();
     presenceHeartbeatTimer = setInterval(sendPresenceHeartbeat, PRESENCE_HEARTBEAT_MS);
     unsubscribePresence = onSnapshot(presenceCollectionRef, (snap) => {
+      presenceErrorText = null;
       presenceDocs = new Map();
       snap.forEach((d) => {
         const data = d.data();
@@ -1236,6 +1252,8 @@ function ensureSignedIn(){
       // Häufigste Ursache: die Firestore-Regel für die "presence"-Unterkategorie
       // wurde in der Firebase-Konsole noch nicht ergänzt (permission-denied).
       console.error('Geräteanzahl konnte nicht geladen werden (Firestore-Regel für "presence" prüfen):', err);
+      presenceErrorText = 'Geräteanzahl-Fehler: ' + (err && err.code ? err.code : 'siehe Konsole');
+      renderDeviceCount();
     });
     // Anzeige auch ohne Serverantwort regelmäßig auffrischen, damit
     // ausgestiegene Geräte (kein Heartbeat mehr) verschwinden.
@@ -1255,6 +1273,7 @@ function ensureSignedIn(){
     }
     presenceCollectionRef = null;
     presenceDocs = new Map();
+    presenceErrorText = null;
     renderDeviceCount();
   }
 
