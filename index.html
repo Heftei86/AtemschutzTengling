@@ -114,6 +114,12 @@
     opacity: 0.92;
   }
 
+  .clock-group{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:6px;
+  }
   .clock{
     font-family: var(--mono);
     font-size: 30px;
@@ -628,7 +634,10 @@
     <input class="einsatz" id="einsatzName" placeholder="Einsatzstelle / Objekt" />
     <input class="einsatz operator-name" id="operatorName" placeholder="Name (dieses Gerät, erscheint im Protokoll)" />
   </div>
-  <div class="clock" id="clock">--:--:--<span class="date" id="dateLine">--</span></div>
+  <div class="clock-group">
+    <div class="clock" id="clock">--:--:--<span class="date" id="dateLine">--</span></div>
+    <button class="icon-btn" id="resetBtn">↺ Zurücksetzen</button>
+  </div>
   <div class="settings">
     <div class="field">
       <label>Kontrollintervall (min)</label>
@@ -638,7 +647,6 @@
       <label>Warnschwelle Druck (bar)</label>
       <input type="number" id="pressureThreshold" min="0" max="300" value="60" />
     </div>
-    <button class="icon-btn" id="resetBtn">↺ Zurücksetzen</button>
   </div>
   </div>
 </header>
