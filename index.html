@@ -145,7 +145,9 @@
     display:flex;
     flex-direction:column;
     justify-content:center;
+    align-items:flex-end;
     gap:6px;
+    margin-left:auto;
   }
   .field{
     display:flex;
@@ -570,6 +572,12 @@
     padding-bottom:8px;
     border-bottom:1px solid var(--line);
   }
+  .sync-bar-col{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:4px;
+  }
   .sync-bar .icon-btn{
     padding: 4px 10px;
     font-size: 11px;
@@ -613,14 +621,18 @@
 
 <header>
   <div class="sync-bar">
-    <div class="field sync-field">
-      <label>Sync-Code</label>
-      <input type="text" id="syncCode" placeholder="z.B. TENGL01" maxlength="16" />
+    <div class="sync-bar-col">
+      <div class="field sync-field">
+        <label>Sync-Code</label>
+        <input type="text" id="syncCode" placeholder="z.B. TENGL01" maxlength="16" />
+      </div>
+      <button class="icon-btn" id="syncToggle">Verbinden</button>
+      <span class="sync-status" id="syncStatus">Nicht verbunden</span>
     </div>
-    <button class="icon-btn" id="syncToggle">Verbinden</button>
-    <span class="sync-status" id="syncStatus">Nicht verbunden</span>
-    <button class="icon-btn active" id="soundToggle">🔊 Ton</button>
-    <button class="icon-btn" id="notifyToggle">🔔 Benachrichtigungen</button>
+    <div class="sync-bar-col">
+      <button class="icon-btn active" id="soundToggle">🔊 Ton</button>
+      <button class="icon-btn" id="notifyToggle">🔔 Benachrichtigungen</button>
+    </div>
     <div class="zoom-group">
       <button class="icon-btn zoom-btn" id="zoomOutBtn" type="button" aria-label="Kacheln verkleinern">−</button>
       <span class="zoom-level" id="zoomLevelText">100%</span>
