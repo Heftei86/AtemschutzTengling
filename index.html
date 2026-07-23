@@ -566,24 +566,31 @@
     display:flex;
     align-items:center;
     justify-content:space-between;
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
     gap:8px 16px;
     width:100%;
     padding-bottom:8px;
     border-bottom:1px solid var(--line);
+    overflow-x:auto;
   }
   .sync-bar-col{
     display:flex;
-    flex-direction:column;
+    flex-direction:row;
     align-items:center;
-    gap:4px;
+    gap:6px;
+    flex-shrink:0;
   }
   .sync-bar .icon-btn{
     padding: 4px 10px;
     font-size: 11px;
+    white-space:nowrap;
   }
-  .sync-field{ gap:1px; }
-  .sync-field label{ font-size: 9px; }
+  .sync-field{
+    flex-direction:row;
+    align-items:center;
+    gap:5px;
+  }
+  .sync-field label{ font-size: 9px; white-space:nowrap; }
   .sync-field input{
     width: 90px;
     text-transform: uppercase;
