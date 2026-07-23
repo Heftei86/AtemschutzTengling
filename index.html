@@ -143,14 +143,19 @@
 
   .settings{
     display:flex;
-    gap:10px;
-    align-items:center;
-    flex-wrap:wrap;
+    flex-direction:column;
+    justify-content:center;
+    gap:6px;
   }
   .field{
     display:flex;
     flex-direction:column;
     gap:2px;
+  }
+  .settings .field{
+    flex-direction:row;
+    align-items:center;
+    gap:6px;
   }
   .field label{
     font-size:10px;
