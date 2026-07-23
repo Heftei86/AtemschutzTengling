@@ -1260,7 +1260,9 @@ function ensureSignedIn(){
     if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
     clearTimeout(syncPushTimer);
     sessionDocRef = null;
-    try{ localStorage.removeItem(SYNC_CODE_KEY); }catch(e){}
+    // Der zuletzt verwendete Sync-Code bleibt bewusst gespeichert (auch nach
+    // dem Trennen und über ein Zurücksetzen hinweg), damit er beim nächsten
+    // Verbinden nicht erneut eingetippt werden muss.
     setSyncStatus('disconnected');
   }
 
