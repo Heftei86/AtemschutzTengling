@@ -754,6 +754,7 @@ function ensureSignedIn(){
   let addTileEl = null;
   const STORAGE_KEY = 'atemschutz_fwdv7_state_v1';
   const SYNC_CODE_KEY = 'atemschutz_sync_code_v1';
+  const SYNC_ACTIVE_KEY = 'atemschutz_sync_active_v1';
   const CLIENT_ID_KEY = 'atemschutz_client_id_v1';
   const trupps = [];
   const logEntries = [];
@@ -1248,7 +1249,10 @@ function ensureSignedIn(){
         console.error('Sync-Empfang fehlgeschlagen', err);
         setSyncStatus('error', err && err.code ? err.code : 'empfang');
       });
-      try{ localStorage.setItem(SYNC_CODE_KEY, code); }catch(e){}
+      try{
+        localStorage.setItem(SYNC_CODE_KEY, code);
+        localStorage.setItem(SYNC_ACTIVE_KEY, '1');
+      }catch(e){}
       startPresence();
       setSyncStatus('connected');
     }catch(e){
@@ -1267,7 +1271,10 @@ function ensureSignedIn(){
     sessionDocRef = null;
     // Der zuletzt verwendete Sync-Code bleibt bewusst gespeichert (auch nach
     // dem Trennen und über ein Zurücksetzen hinweg), damit er beim nächsten
-    // Verbinden nicht erneut eingetippt werden muss.
+    // Verbinden nicht erneut eingetippt werden muss. Das separate "aktiv"-Flag
+    // sorgt aber dafür, dass nach einem bewussten Trennen NICHT automatisch
+    // wieder verbunden wird, wenn die Seite neu geladen wird.
+    try{ localStorage.setItem(SYNC_ACTIVE_KEY, '0'); }catch(e){}
     setSyncStatus('disconnected');
   }
 
@@ -1763,12 +1770,18 @@ function ensureSignedIn(){
   applyZoom();
   updateEndedIndicator();
 
-  // Zuvor verwendeten Sync-Code beim Start automatisch wieder verbinden,
-  // ohne den Status zwischendurch auf "Nicht verbunden" springen zu lassen.
+  // Zuvor verwendeten Sync-Code beim Start automatisch wieder verbinden –
+  // aber nur, wenn die Verbindung zuletzt nicht bewusst getrennt wurde.
   let savedSyncCode = null;
-  try{ savedSyncCode = localStorage.getItem(SYNC_CODE_KEY); }catch(e){}
+  let wasActive = false;
+  try{
+    savedSyncCode = localStorage.getItem(SYNC_CODE_KEY);
+    wasActive = localStorage.getItem(SYNC_ACTIVE_KEY) === '1';
+  }catch(e){}
   if(savedSyncCode){
     syncCodeInput.value = savedSyncCode;
+  }
+  if(savedSyncCode && wasActive){
     setSyncStatus('connecting');
     connectSync(savedSyncCode);
   } else {
