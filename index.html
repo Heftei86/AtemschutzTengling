@@ -623,6 +623,7 @@
     .grid{ grid-template-columns: 1fr; }
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -934,7 +935,11 @@ function ensureSignedIn(){
   function addLog(truppName, event, detail, feuerwehr, truppId){
     const now = new Date();
     const by = (operatorNameInput.value || '').trim();
-    logEntries.unshift({ts: now.toISOString(), time: fmtClock(now), trupp: truppName, truppId: truppId, feuerwehr: feuerwehr || '', event, detail: detail || '', by});
+    const members = [1,2,3].map(n => {
+      const el = document.getElementById('member-' + truppId + '-' + n);
+      return el ? el.value.trim() : '';
+    });
+    logEntries.unshift({ts: now.toISOString(), time: fmtClock(now), trupp: truppName, truppId: truppId, feuerwehr: feuerwehr || '', event, detail: detail || '', by, members});
     renderLog();
   }
 
@@ -1757,16 +1762,18 @@ function ensureSignedIn(){
   restoreState();
   applyZoom();
   updateEndedIndicator();
-  setSyncStatus('disconnected');
 
-  // Zuvor verwendeten Sync-Code beim Start automatisch wieder verbinden.
-  try{
-    const savedSyncCode = localStorage.getItem(SYNC_CODE_KEY);
-    if(savedSyncCode){
-      syncCodeInput.value = savedSyncCode;
-      connectSync(savedSyncCode);
-    }
-  }catch(e){}
+  // Zuvor verwendeten Sync-Code beim Start automatisch wieder verbinden,
+  // ohne den Status zwischendurch auf "Nicht verbunden" springen zu lassen.
+  let savedSyncCode = null;
+  try{ savedSyncCode = localStorage.getItem(SYNC_CODE_KEY); }catch(e){}
+  if(savedSyncCode){
+    syncCodeInput.value = savedSyncCode;
+    setSyncStatus('connecting');
+    connectSync(savedSyncCode);
+  } else {
+    setSyncStatus('disconnected');
+  }
 
   function tick(){
     const now = new Date();
@@ -1988,24 +1995,44 @@ function ensureSignedIn(){
   exportBtn.addEventListener('click', () => {
     const einsatz = document.getElementById('einsatzName').value.trim() || 'Ohne Angabe';
     const now = new Date();
-    let lines = [];
-    lines.push('Einsatzprotokoll Atemschutzüberwachung (FwDV 7)');
-    lines.push('Einsatzstelle: ' + einsatz);
-    lines.push('Erstellt: ' + fmtDate(now) + ' ' + fmtClock(now));
-    lines.push('');
-    lines.push('Uhrzeit;Trupp;Feuerwehr;Ereignis;Detail;Eingabe durch');
-    [...logEntries].reverse().forEach(e => {
-      lines.push(e.time + ';' + e.trupp + ';' + (e.feuerwehr || '') + ';' + e.event + ';' + e.detail + ';' + (e.by || ''));
-    });
-    const blob = new Blob([lines.join('\n')], {type: 'text/csv;charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'Atemschutz_Protokoll_' + now.toISOString().slice(0,19).replace(/[:T]/g,'-') + '.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+
+    const infoRows = [
+      ['Einsatzprotokoll Atemschutzüberwachung (FwDV 7)'],
+      ['Einsatzstelle: ' + einsatz],
+      ['Erstellt: ' + fmtDate(now) + ' ' + fmtClock(now)],
+      []
+    ];
+    const headerRow = ['Uhrzeit', 'Trupp', 'Feuerwehr', 'Mitglied 1', 'Mitglied 2', 'Mitglied 3', 'Ereignis', 'Detail', 'Eingabe durch'];
+    const dataRows = [...logEntries].reverse().map(e => [
+      e.time,
+      e.trupp,
+      e.feuerwehr || '',
+      (e.members && e.members[0]) || '',
+      (e.members && e.members[1]) || '',
+      (e.members && e.members[2]) || '',
+      e.event,
+      e.detail || '',
+      e.by || ''
+    ]);
+
+    const sheetData = [...infoRows, headerRow, ...dataRows];
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+    // Als filterbare Excel-Tabelle markieren: AutoFilter über Kopfzeile + alle Datenzeilen.
+    const headerRowIndex = infoRows.length; // 0-basiert
+    const lastRowIndex = sheetData.length - 1;
+    const lastColIndex = headerRow.length - 1;
+    ws['!autofilter'] = {
+      ref: XLSX.utils.encode_range({ s: { r: headerRowIndex, c: 0 }, e: { r: lastRowIndex, c: lastColIndex } })
+    };
+
+    ws['!cols'] = [
+      { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 26 }, { wch: 34 }, { wch: 16 }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Protokoll');
+    XLSX.writeFile(wb, 'Atemschutz_Protokoll_' + now.toISOString().slice(0,19).replace(/[:T]/g,'-') + '.xlsx');
   });
 
 })();
