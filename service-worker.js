@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atemschutz-cache-v4';
+const CACHE_NAME = 'atemschutz-cache-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -7,20 +7,10 @@ const ASSETS = [
   './icons/icon-512.png',
   './icons/icon-512-maskable.png'
 ];
-// Für den Excel-Export wird die SheetJS-Bibliothek von einem CDN geladen.
-// Damit der Export auch ohne Internetverbindung funktioniert, wird sie
-// beim ersten (Online-)Aufruf mit im Cache abgelegt.
-const XLSX_LIB_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) =>
-      cache.addAll(ASSETS).then(() =>
-        // Best effort: falls beim allerersten Installieren keine Internetverbindung
-        // besteht, soll das die App selbst nicht blockieren.
-        cache.add(XLSX_LIB_URL).catch(() => {})
-      )
-    )
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
   self.skipWaiting();
 });
@@ -39,12 +29,10 @@ self.addEventListener('activate', (event) => {
 // (z.B. im Keller/Einsatz ohne Empfang), greift der zuletzt gespeicherte Stand.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  const isXlsxLib = event.request.url === XLSX_LIB_URL;
-  // Nur Requests an die eigene Origin abfangen/cachen (plus die eine
-  // XLSX-Bibliothek als gezielte Ausnahme für den Offline-Export).
-  // Firebase (Firestore, Auth, gstatic-Module) läuft über eigene Verbindungen
-  // (u.a. WebChannel/WebSocket) und darf vom Service Worker nicht beeinflusst werden.
-  if (!isXlsxLib && !event.request.url.startsWith(self.location.origin)) return;
+  // Nur Requests an die eigene Origin abfangen/cachen. Firebase (Firestore,
+  // Auth, gstatic-Module) läuft über eigene Verbindungen (u.a. WebChannel/
+  // WebSocket) und darf vom Service Worker nicht beeinflusst werden.
+  if (!event.request.url.startsWith(self.location.origin)) return;
 
   event.respondWith(
     fetch(event.request)
