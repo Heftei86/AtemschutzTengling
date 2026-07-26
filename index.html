@@ -874,14 +874,12 @@ function ensureSignedIn(){
     }
   }
 
-  function sendOverdueNotification(truppName, feuerwehr){
+  function showAppNotification(title, body, tag){
     if(!notifyOn) return;
     if(!('Notification' in window) || Notification.permission !== 'granted') return;
-    const title = 'Abfrage fällig – ' + truppName;
-    const body = (feuerwehr ? feuerwehr + ': ' : '') + 'Bitte sofort Rückmeldung einholen!';
     const options = {
       body: body,
-      tag: 'atemschutz-' + truppName,
+      tag: tag,
       renotify: true,
       icon: 'icons/icon-192.png',
       badge: 'icons/icon-192.png',
@@ -889,8 +887,12 @@ function ensureSignedIn(){
     };
     if('serviceWorker' in navigator){
       navigator.serviceWorker.getRegistration().then((reg) => {
-        if(reg){
-          reg.showNotification(title, options);
+        if(reg && reg.active){
+          try{
+            reg.showNotification(title, options);
+          }catch(e){
+            try{ new Notification(title, options); }catch(e2){}
+          }
         } else {
           try{ new Notification(title, options); }catch(e){}
         }
@@ -900,6 +902,18 @@ function ensureSignedIn(){
     } else {
       try{ new Notification(title, options); }catch(e){}
     }
+  }
+
+  function sendOverdueNotification(truppName, feuerwehr){
+    const title = 'Abfrage fällig – ' + truppName;
+    const body = (feuerwehr ? feuerwehr + ': ' : '') + 'Bitte sofort Rückmeldung einholen!';
+    showAppNotification(title, body, 'atemschutz-faellig-' + truppName);
+  }
+
+  function sendPressureWarningNotification(truppName, feuerwehr){
+    const title = 'Rückzug (Luft) – ' + truppName;
+    const body = (feuerwehr ? feuerwehr + ': ' : '') + 'Flaschendruck unter Warnschwelle – Trupp tritt Rückzug an!';
+    showAppNotification(title, body, 'atemschutz-druck-' + truppName);
   }
 
   function updateEndedIndicator(){
@@ -1206,7 +1220,7 @@ function ensureSignedIn(){
       // hörbar/sichtbar wird, wird hier bei jedem Gerät erneut alarmiert.
       if(t.pressureWarning && !wasPressureWarning){
         alertSound();
-        sendOverdueNotification(t.name + ' – Rückzug (Luft)', saved.feuerwehr || '');
+        sendPressureWarningNotification(t.name, saved.feuerwehr || '');
       }
     });
 
@@ -1547,6 +1561,7 @@ function ensureSignedIn(){
         if(!t.pressureAlerted){
           t.pressureAlerted = true;
           alertSound();
+          sendPressureWarningNotification(t.name, currentFeuerwehr());
           addLog(t.name, 'RÜCKZUG – Flaschendruck', p + ' bar ≤ Warnschwelle (' + threshold + ' bar)' + noteSuffix, currentFeuerwehr(), t.id);
         } else {
           addLog(t.name, 'Rückmeldung', p + ' bar (weiterhin unter Warnschwelle)' + noteSuffix, currentFeuerwehr(), t.id);
@@ -2049,6 +2064,17 @@ function ensureSignedIn(){
   });
 
 })();
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js").then((reg) => {
+      console.log("Service Worker registriert:", reg.scope);
+    }).catch((err) => {
+      console.error("Service-Worker-Registrierung fehlgeschlagen:", err);
+    });
+  });
+}
 </script>
 </body>
 </html>

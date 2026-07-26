@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atemschutz-cache-v4';
+const CACHE_NAME = 'atemschutz-cache-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -15,11 +15,13 @@ const XLSX_LIB_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.mi
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) =>
-      cache.addAll(ASSETS).then(() =>
-        // Best effort: falls beim allerersten Installieren keine Internetverbindung
-        // besteht, soll das die App selbst nicht blockieren.
-        cache.add(XLSX_LIB_URL).catch(() => {})
-      )
+      // Jede Datei einzeln mit eigenem Fehlerfang cachen: schlägt eine davon fehl
+      // (z.B. kurzer Netzwerkaussetzer), darf das NICHT die komplette Installation
+      // verhindern – sonst bleibt der Service Worker inaktiv und Benachrichtigungen
+      // funktionieren auf Android/Smartphones dann gar nicht mehr.
+      Promise.all(
+        ASSETS.map((url) => cache.add(url).catch((e) => console.warn('SW: Datei konnte nicht gecacht werden:', url, e)))
+      ).then(() => cache.add(XLSX_LIB_URL).catch(() => {}))
     )
   );
   self.skipWaiting();
