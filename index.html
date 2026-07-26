@@ -889,8 +889,12 @@ function ensureSignedIn(){
     };
     if('serviceWorker' in navigator){
       navigator.serviceWorker.getRegistration().then((reg) => {
-        if(reg){
-          reg.showNotification(title, options);
+        if(reg && reg.active){
+          try{
+            reg.showNotification(title, options);
+          }catch(e){
+            try{ new Notification(title, options); }catch(e2){}
+          }
         } else {
           try{ new Notification(title, options); }catch(e){}
         }
