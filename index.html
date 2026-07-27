@@ -481,6 +481,16 @@
     grid-template-columns: 1fr 1fr;
     gap:6px;
   }
+  body.no-operator .btn-row button:not(:disabled),
+  body.no-operator .add-trupp-btn{
+    opacity:0.4;
+    pointer-events:none;
+    cursor:not-allowed;
+  }
+  #operatorName.needs-input{
+    border-color: var(--fire);
+    box-shadow: 0 0 0 1px var(--fire);
+  }
   .btn-row button{
     border-radius:6px;
     padding: 10px 6px;
@@ -941,6 +951,18 @@ function ensureSignedIn(){
   const OPERATOR_NAME_KEY = 'atemschutz_operator_name_v1';
   const operatorNameInput = document.getElementById('operatorName');
   try{ operatorNameInput.value = localStorage.getItem(OPERATOR_NAME_KEY) || ''; }catch(e){}
+
+  function hasOperatorName(){
+    return (operatorNameInput.value || '').trim().length > 0;
+  }
+  function updateOperatorGate(){
+    const has = hasOperatorName();
+    document.body.classList.toggle('no-operator', !has);
+    operatorNameInput.classList.toggle('needs-input', !has);
+  }
+  updateOperatorGate();
+
+  operatorNameInput.addEventListener('input', updateOperatorGate);
   operatorNameInput.addEventListener('change', () => {
     try{ localStorage.setItem(OPERATOR_NAME_KEY, operatorNameInput.value.trim()); }catch(e){}
   });
@@ -1513,6 +1535,7 @@ function ensureSignedIn(){
     refreshStartButton();
 
     document.getElementById('start-' + t.id).addEventListener('click', () => {
+      if(!hasOperatorName()){ alert('Bitte zuerst oben im Header den Namen für dieses Gerät eintragen.'); return; }
       const ok = confirm(t.name + ' wirklich starten – Einsatz unter Atemschutz beginnt jetzt?');
       if(!ok) return;
       t.state = 'active';
@@ -1541,6 +1564,7 @@ function ensureSignedIn(){
     });
 
     document.getElementById('ruckmeld-' + t.id).addEventListener('click', () => {
+      if(!hasOperatorName()){ alert('Bitte zuerst oben im Header den Namen für dieses Gerät eintragen.'); return; }
       t.lastCheck = new Date();
       t.alerted = false;
       t.lastAlertAt = null;
@@ -1577,6 +1601,7 @@ function ensureSignedIn(){
     });
 
     document.getElementById('ruckzug-' + t.id).addEventListener('click', () => {
+      if(!hasOperatorName()){ alert('Bitte zuerst oben im Header den Namen für dieses Gerät eintragen.'); return; }
       t.rueckzugManual = !t.rueckzugManual;
       const btn = document.getElementById('ruckzug-' + t.id);
       btn.textContent = t.rueckzugManual ? 'Rückzug aufheben' : 'Rückzug';
@@ -1585,6 +1610,7 @@ function ensureSignedIn(){
     });
 
     document.getElementById('ende-' + t.id).addEventListener('click', () => {
+      if(!hasOperatorName()){ alert('Bitte zuerst oben im Header den Namen für dieses Gerät eintragen.'); return; }
       const ok = confirm(t.name + ' wirklich beenden? Die Kachel wird danach ausgeblendet.');
       if(!ok) return;
       t.state = 'ended';
@@ -1774,6 +1800,7 @@ function ensureSignedIn(){
   addTileEl = addTile;
 
   function addNewTrupp(){
+    if(!hasOperatorName()){ alert('Bitte zuerst oben im Header den Namen für dieses Gerät eintragen.'); return; }
     const id = nextTruppId++;
     const t = createTrupp(id);
     buildCard(t);
