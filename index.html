@@ -962,9 +962,16 @@ function ensureSignedIn(){
   }
   updateOperatorGate();
 
+  let lastKnownOperatorName = operatorNameInput.value.trim();
+
   operatorNameInput.addEventListener('input', updateOperatorGate);
   operatorNameInput.addEventListener('change', () => {
-    try{ localStorage.setItem(OPERATOR_NAME_KEY, operatorNameInput.value.trim()); }catch(e){}
+    const newName = operatorNameInput.value.trim();
+    try{ localStorage.setItem(OPERATOR_NAME_KEY, newName); }catch(e){}
+    if(lastKnownOperatorName && newName && newName !== lastKnownOperatorName){
+      addLog('Gerät', 'Name geändert', 'Name wurde von "' + lastKnownOperatorName + '" auf "' + newName + '" geändert', '', null);
+    }
+    lastKnownOperatorName = newName;
   });
 
   // Der Name ist bewusst geräte-/personengebunden und wird NICHT synchronisiert –
