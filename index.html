@@ -793,8 +793,8 @@ function ensureSignedIn(){
   let presenceRefreshTimer = null;
   let presenceDocs = new Map();
   let presenceErrorText = null;
-  const PRESENCE_HEARTBEAT_MS = 20000;
-  const PRESENCE_STALE_MS = 50000;
+  const PRESENCE_HEARTBEAT_MS = 60000;
+  const PRESENCE_STALE_MS = 10 * 60 * 1000; // 10 Minuten – ein Gerät gilt so lange als verbunden, außer es trennt manuell (dann sofort)
 
   function applyZoom(){
     grid.style.zoom = zoomLevel;
