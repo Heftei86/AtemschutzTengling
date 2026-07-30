@@ -2023,6 +2023,10 @@ function ensureSignedIn(){
   });
 
   resetBtn.addEventListener('click', () => {
+    if(!hasOperatorName()){
+      alert('Bitte zuerst oben im Header den Namen für dieses Gerät eintragen, bevor zurückgesetzt werden kann.');
+      return;
+    }
     if(syncEnabled){
       const current = currentSyncCode();
       const typed = prompt('Dieses Gerät ist per Sync verbunden. Der Reset wirkt auf ALLE verbundenen Geräte!\n\nZur Bestätigung bitte den aktuellen Sync-Code eingeben: "' + current + '"');
@@ -2041,6 +2045,10 @@ function ensureSignedIn(){
     try{
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ notifyOn: keepNotifyOn, zoomLevel: keepZoomLevel }));
     }catch(e){}
+    // Namensfeld nach dem Zurücksetzen leeren – die nächste Person muss sich
+    // erst wieder eintragen, bevor sie das Gerät bedienen oder erneut
+    // zurücksetzen kann.
+    try{ localStorage.removeItem(OPERATOR_NAME_KEY); }catch(e){}
     if(syncEnabled && sessionDocRef){
       setDoc(sessionDocRef, {
         settings: { einsatzName: '', intervalMin: '10', pressureThreshold: '60' },
