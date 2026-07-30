@@ -1184,9 +1184,6 @@ function ensureSignedIn(){
     archivePanel.hidden = !willOpen;
     if(willOpen){
       archiveListEl.innerHTML = '<div class="archive-empty">Lädt …</div>';
-      // Aktuellen Stand ebenfalls sichern, bevor das Archiv angezeigt wird –
-      // so geht nichts verloren, falls danach ein älterer Stand wiederhergestellt wird.
-      await saveArchiveEntry(collectFullBackup());
       const list = await loadArchiveList();
       renderArchiveList(list);
     }
