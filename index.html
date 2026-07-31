@@ -1134,9 +1134,16 @@ function ensureSignedIn(){
     }
   }
 
-  function restoreArchiveEntry(entry){
+  async function restoreArchiveEntry(entry){
+    if(!hasOperatorName()){
+      alert('Bitte zuerst oben im Header den Namen für dieses Gerät eintragen, bevor ein Stand wiederhergestellt werden kann.');
+      return;
+    }
     const ok = confirm('Diesen Stand vom ' + fmtDate(new Date(entry.at)) + ' ' + fmtClock(new Date(entry.at)) + ' wirklich wiederherstellen?\n\nDer aktuelle Stand (Trupps + Protokoll) wird dabei überschrieben' + (syncEnabled ? ' – auf ALLEN verbundenen Geräten!' : '.'));
     if(!ok) return;
+    // Aktuellen Stand vor dem Überschreiben ebenfalls sichern, damit er bei
+    // Bedarf über das Archiv wiederhergestellt werden kann.
+    await saveArchiveEntry(collectFullBackup());
     applyRemoteState({ settings: entry.settings, trupps: entry.trupps, logEntries: entry.logEntries }, { replaceLogs: true });
     saveState();
     if(syncEnabled && sessionDocRef){
