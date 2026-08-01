@@ -113,6 +113,13 @@
     padding: 6px 10px;
     opacity: 0.92;
   }
+  .operator-required-hint{
+    color: #AF2B1E; /* RAL 3000 – Feuerrot */
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-align: center;
+  }
 
   .clock-group{
     display:flex;
@@ -726,6 +733,7 @@
   <div class="einsatz-group">
     <input class="einsatz" id="einsatzName" placeholder="Einsatzstelle / Objekt" />
     <input class="einsatz operator-name" id="operatorName" placeholder="Name (dieses Gerät, erscheint im Protokoll)" />
+    <div class="operator-required-hint">!!!Pflichtfeld!!!</div>
   </div>
   <div class="clock-group">
     <div class="clock" id="clock">--:--:--<span class="date" id="dateLine">--</span></div>
